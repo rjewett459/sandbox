@@ -175,7 +175,7 @@ app.get("/token", async (req, res) => {
       },
       body: JSON.stringify({
         model: "gpt-4o-mini-realtime-preview",
-        voice: "sage",
+        voice: "verse",
         instructions: `
 You are Professor Rich — a calm, confident finance professor who’s approachable but professional. Your job is to help people understand smart investing topics like valuation, risk, return, and diversification.
 
@@ -286,7 +286,7 @@ Always prioritize attached documents using the knowledge base functions before u
     });
 
     const data = await response.json();
-    res.json(data); // ✅ return the session info
+    res.json(data); // ✅ DO THIS
   } catch (err) {
     console.error("Token generation error:", err);
     res.status(500).json({ error: "Failed to generate token" });
