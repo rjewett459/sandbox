@@ -13,7 +13,7 @@ const __dirname = path.dirname(__filename);
 const isProd = process.env.NODE_ENV === "production";
 const port = process.env.PORT || 3000;
 const apiKey = process.env.OPENAI_API_KEY;
-const assistantId = process.env.OPENAI_ASSISTANT_ID;
+const assistantId = process.env.ASSISTANT_ID;
 const vectorStoreId = process.env.OPENAI_VECTOR_STORE_ID;
 const fallbackReplyMinLength = parseInt(process.env.FALLBACK_REPLY_MIN_LENGTH || "20", 10);
 const speechReplyMinLength = parseInt(process.env.SPEECH_REPLY_MIN_LENGTH || "10", 10);
@@ -26,7 +26,7 @@ if (!apiKey) {
   process.exit(1);
 }
 if (!assistantId) {
-  console.error("FATAL ERROR: OPENAI_ASSISTANT_ID is not defined.");
+  console.error("FATAL ERROR: ASSISTANT_ID is not defined.");
   process.exit(1);
 }
 if (!vectorStoreId && fallbackStrategy.includes("VECTOR_STORE")) {
