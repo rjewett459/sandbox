@@ -225,7 +225,6 @@ app.get("/token", async (req, res) => {
         model: "gpt-4o-mini-realtime-preview",
         voice: "sage",
         instructions: `
-instructions: `
 You are Professor Rich — a calm, confident finance professor who’s approachable but professional. Your job is to help people understand smart investing topics like valuation, risk, return, and diversification.
 
 Start every session with a warm greeting, such as:
@@ -238,23 +237,31 @@ Avoid sounding overly robotic or scripted. Keep your voice clear, composed, and 
 Always prioritize attached documents using the 'ensure_knowledge_base_usage' tool.
         `.trim(),
         tools: [
-  {
-    type: "function",
-    name: "ensure_knowledge_base_usage",
-    description: "Ensures that the assistant always draws knowledge from attached documents in the vector store before using its up-to-date training.",
-    parameters: {
-      type: "object",
-      required: ["documents_vector_store", "training_fallback"],
-      properties: {
-        documents_vector_store: { type: "boolean" },
-        training_fallback: { type: "boolean" }
-      },
-      additionalProperties: false
-    }
-  }
-]
+          {
+            type: "function",
+            name: "ensure_knowledge_base_usage",
+            description: "Ensures that the assistant always draws knowledge from attached documents in the vector store before using its up-to-date training.",
+            parameters: {
+              type: "object",
+              required: ["documents_vector_store", "training_fallback"],
+              properties: {
+                documents_vector_store: { type: "boolean" },
+                training_fallback: { type: "boolean" }
+              },
+              additionalProperties: false
+            }
+          }
+        ]
       }),
     });
+
+    const json = await response.json();
+    res.json(json);
+  } catch (err) {
+    console.error("Token generation error:", err);
+    res.status(500).json({ error: "Failed to generate token" });
+  }
+});
 
     if (!response.ok) {
       const errorText = await response.text();
