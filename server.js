@@ -51,9 +51,12 @@ async function waitForRunCompletion(threadId, runId, openaiInstance) {
 app.post("/ask", async (req, res) => {
   try {
     const userText = req.body.text;
+    const userId = req.body.user_id || "anonymous_user"; // ✅ Identify the user for memory
+
     if (!userText) return res.status(400).json({ error: "Missing text in request body" });
 
     const thread = await openai.beta.threads.create();
+
     await openai.beta.threads.messages.create(thread.id, {
       role: "user",
       content: userText,
@@ -68,6 +71,7 @@ app.post("/ask", async (req, res) => {
       try {
         run = await openai.beta.threads.runs.create(thread.id, {
           assistant_id: assistantId,
+          user_id: userId, // ✅ Include user_id for memory tracking
           tool_choice: { type: "file_search" },
           tool_resources: {
             file_search: {
@@ -75,6 +79,7 @@ app.post("/ask", async (req, res) => {
             },
           },
         });
+
         await waitForRunCompletion(thread.id, run.id, openai);
         messages = await openai.beta.threads.messages.list(thread.id, { order: 'desc', limit: 1 });
         reply = messages.data[0]?.content[0]?.text?.value || "";
@@ -95,6 +100,7 @@ app.post("/ask", async (req, res) => {
 
       run = await openai.beta.threads.runs.create(thread.id, {
         assistant_id: assistantId,
+        user_id: userId, // ✅ Include user_id here too
       });
 
       await waitForRunCompletion(thread.id, run.id, openai);
