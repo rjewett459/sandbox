@@ -186,29 +186,107 @@ If someone asks about politics, religion, jokes, or anything off-topic, politely
 "I'm here to help you understand finance and investing. Let’s stick to those topics."
 
 Avoid sounding overly robotic or scripted. Keep your voice clear, composed, and welcoming. Pace your speech naturally and emphasize important numbers or deadlines.
-Always prioritize attached documents using the 'ensure_knowledge_base_usage' tool.
+
+Always prioritize attached documents using the knowledge base functions before using model training.
         `.trim(),
         tools: [
+          { type: "file_search" },
           {
             type: "function",
-            name: "ensure_knowledge_base_usage",
-            description: "Ensures that the assistant always draws knowledge from attached documents in the vector store before using its up-to-date training.",
-            parameters: {
-              type: "object",
-              required: ["documents_vector_store", "training_fallback"],
-              properties: {
-                documents_vector_store: { type: "boolean" },
-                training_fallback: { type: "boolean" }
-              },
-              additionalProperties: false
+            function: {
+              name: "lookupFundamentalsAndTechnicals",
+              description: "Answer questions using the Fundamentals & Technicals document.",
+              parameters: {
+                type: "object",
+                properties: {
+                  question: {
+                    type: "string",
+                    description: "The user's question about fundamental or technical analysis."
+                  }
+                },
+                required: ["question"]
+              }
+            }
+          },
+          {
+            type: "function",
+            function: {
+              name: "lookupIntroForBeginners",
+              description: "Answer questions using the Introduction for Beginners document.",
+              parameters: {
+                type: "object",
+                properties: {
+                  question: {
+                    type: "string",
+                    description: "The user's beginner-level question about finance, investing, or Wall Street."
+                  }
+                },
+                required: ["question"]
+              }
+            }
+          },
+          {
+            type: "function",
+            function: {
+              name: "lookupWallStreetHistory",
+              description: "Answer questions using the African-Americans Wall Street CEO's document.",
+              parameters: {
+                type: "object",
+                properties: {
+                  question: {
+                    type: "string",
+                    description: "The user's question about African-American CEOs or Wall Street history."
+                  }
+                },
+                required: ["question"]
+              }
+            }
+          },
+          {
+            type: "function",
+            function: {
+              name: "lookupDryPowderStrategies",
+              description: "Answer questions using the Dry Powder Strategies document.",
+              parameters: {
+                type: "object",
+                properties: {
+                  question: {
+                    type: "string",
+                    description: "The user's question about dry powder investing, liquidity, or cash strategies."
+                  }
+                },
+                required: ["question"]
+              }
+            }
+          },
+          {
+            type: "function",
+            function: {
+              name: "lookupHomeBuyingInfo",
+              description: "Answer questions using the Buying A Home document.",
+              parameters: {
+                type: "object",
+                properties: {
+                  question: {
+                    type: "string",
+                    description: "The user's question about home buying, mortgage preparation, or first-time buyer tips."
+                  }
+                },
+                required: ["question"]
+              }
             }
           }
-        ]
+        ],
+        tool_resources: {
+          file_search: {
+            vector_store_ids: ["vs_68265a0e70b081918938e8df5060d328"]
+          }
+        }
       }),
     });
 
     const data = await response.json();
-    res.json(data); // ✅ return the full structure with client_secret.value
+    res.json(data); // ✅ return the session info
   } catch (err) {
     console.error("Token generation error:", err);
     res.status(500).json({ error: "Failed to generate token" });
