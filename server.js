@@ -214,14 +214,11 @@ Always prioritize attached documents using the 'ensure_knowledge_base_usage' too
     }
 
     const data = await response.json();
+    res.json(data);
     if (!data.client_secret || !data.client_secret.value) {
       console.error("[TOKEN ERROR] No client_secret returned:", data);
       return res.status(500).json({ error: "Missing client_secret in OpenAI response", raw: data });
     }
-
-    res.json({
-      token: data.client_secret.value,
-      expires_in: data.client_secret.expires_at
     });
   } catch (error) {
     console.error("[TOKEN ERROR] Unexpected:", error);
