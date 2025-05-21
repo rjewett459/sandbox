@@ -1,7 +1,7 @@
 import express from "express";
 import fs from "fs";
 import { createServer as createViteServer } from "vite";
-import "dotenv/config"; // Make sure to install dotenv: npm install dotenv
+import "dotenv/config";
 import OpenAI from "openai";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -13,54 +13,46 @@ const __dirname = path.dirname(__filename);
 const isProd = process.env.NODE_ENV === "production";
 const port = process.env.PORT || 3000;
 const apiKey = process.env.OPENAI_API_KEY;
-
 const assistantId = process.env.OPENAI_ASSISTANT_ID;
 const vectorStoreId = process.env.OPENAI_VECTOR_STORE_ID;
 const fallbackReplyMinLength = parseInt(process.env.FALLBACK_REPLY_MIN_LENGTH || "20", 10);
 const speechReplyMinLength = parseInt(process.env.SPEECH_REPLY_MIN_LENGTH || "10", 10);
-const realtimeModelName = process.env.REALTIME_MODEL_NAME || "gpt-4o-realtime-preview-2024-12-17"; // Example, ensure this is current
-const fallbackStrategy = process.env.FALLBACK_STRATEGY || "RETRY_NO_ADDITIONAL_PROMPT"; // "RETRY_NO_ADDITIONAL_PROMPT" or "RETRY_WITH_CLARIFICATION_PROMPT"
+const realtimeModelName = process.env.REALTIME_MODEL_NAME || "gpt-4o-realtime-preview-2024-12-17";
+const fallbackStrategy = process.env.FALLBACK_STRATEGY || "RETRY_NO_ADDITIONAL_PROMPT";
 const fallbackClarificationPrompt = process.env.FALLBACK_CLARIFICATION_PROMPT || "The previous answer was not detailed enough. Please try answering again using your broader knowledge and context from our conversation so far.";
 
-
-// --- Validate Essential Configuration ---
 if (!apiKey) {
-  console.error("FATAL ERROR: OPENAI_API_KEY is not defined in your environment variables.");
+  console.error("FATAL ERROR: OPENAI_API_KEY is not defined.");
   process.exit(1);
 }
 if (!assistantId) {
-  console.error("FATAL ERROR: OPENAI_ASSISTANT_ID is not defined in your environment variables.");
+  console.error("FATAL ERROR: OPENAI_ASSISTANT_ID is not defined.");
   process.exit(1);
 }
-if (!vectorStoreId && fallbackStrategy.includes("VECTOR_STORE")) { // If your strategy relies on it
-    console.warn("WARNING: OPENAI_VECTOR_STORE_ID is not defined. Vector store search might not work as expected.");
+if (!vectorStoreId && fallbackStrategy.includes("VECTOR_STORE")) {
+  console.warn("WARNING: OPENAI_VECTOR_STORE_ID is not defined.");
 }
-
 
 const openai = new OpenAI({ apiKey });
 const app = express();
 app.use(express.json());
 
-// --- Helper Function to Wait for Run Completion ---
 async function waitForRunCompletion(threadId, runId, openaiInstance) {
   let runStatus = await openaiInstance.beta.threads.runs.retrieve(threadId, runId);
   while (["queued", "in_progress", "requires_action"].includes(runStatus.status)) {
-    await new Promise((resolve) => setTimeout(resolve, 1000)); // Poll every 1 second
+    await new Promise((resolve) => setTimeout(resolve, 1000));
     runStatus = await openaiInstance.beta.threads.runs.retrieve(threadId, runId);
 
     if (runStatus.status === "requires_action" && runStatus.required_action?.type === "submit_tool_outputs") {
-        // This is a basic example. You might need to handle specific tool calls if your assistant uses them.
-        // For now, assuming file_search doesn't require manual tool output submission in this flow.
-        // If other tools are added, this part would need to be expanded.
-        console.log(`Run ${runId} requires action: ${runStatus.required_action.type}. Submitting empty tool outputs for now if applicable.`);
-        try {
-            await openaiInstance.beta.threads.runs.submitToolOutputs(threadId, runId, {
-                tool_outputs: [] // Or map runStatus.required_action.submit_tool_outputs.tool_calls
-            });
-        } catch (toolSubmitError) {
-            console.error(`Error submitting tool outputs for run ${runId}:`, toolSubmitError);
-            throw new Error(`Run ${runId} failed during tool output submission.`);
-        }
+      console.log(`Run ${runId} requires action: ${runStatus.required_action.type}. Submitting empty tool outputs.`);
+      try {
+        await openaiInstance.beta.threads.runs.submitToolOutputs(threadId, runId, {
+          tool_outputs: []
+        });
+      } catch (toolSubmitError) {
+        console.error(`Error submitting tool outputs for run ${runId}:`, toolSubmitError);
+        throw new Error(`Run ${runId} failed during tool output submission.`);
+      }
     }
   }
 
@@ -79,30 +71,6 @@ app.post("/ask", async (req, res) => {
     if (!userText) {
       return res.status(400).json({ error: "Missing text in request body" });
     }
-    if (!assistantId) {
-        return res.status(500).json({ error: "Assistant ID is not configured on the server." });
-    }
-    if (!vectorStoreId) {
-        console.warn("OPENAI_VECTOR_STORE_ID is not set. Vector store search pass will be skipped or may fail if assistant relies on it.");
-        // Depending on strictness, you might want to return an error here
-        // return res.status(500).json({ error: "Vector Store ID is not configured." });
-    }
-    run = await openai.beta.threads.runs.create(thread.id, {
-  assistant_id: assistantId,
-  tool_choice: {
-    type: "function",
-    function: "ensure_knowledge_base_usage"
-  },
-  tool_resources: {
-    function: {
-      ensure_knowledge_base_usage: {
-        documents_vector_store: true,
-        training_fallback: true
-      }
-    }
-  }
-});
-
 
     const thread = await openai.beta.threads.create();
 
@@ -115,104 +83,88 @@ app.post("/ask", async (req, res) => {
     let run;
     let messages;
 
-    // === PASS 1: Vector Store Only (if vectorStoreId is configured) ===
     if (vectorStoreId) {
-        console.log("Attempting PASS 1: Vector Store Search");
-        try {
-            run = await openai.beta.threads.runs.create(thread.id, {
-              assistant_id: assistantId,
-              tool_choice: { type: "file_search" }, // Forcing file_search (vector store)
-              tool_resources: {
-                file_search: {
-                  vector_store_ids: [vectorStoreId],
-                },
-              },
-            });
-            await waitForRunCompletion(thread.id, run.id, openai);
-            messages = await openai.beta.threads.messages.list(thread.id, { order: 'desc', limit: 1 });
-            reply = messages.data[0]?.content[0]?.text?.value || "";
-            console.log("🔍 Vector reply:", reply);
-        } catch (vectorError) {
-            console.error("Error during PASS 1 (Vector Store Search):", vectorError.message);
-            reply = ""; // Ensure reply is empty to trigger fallback
-        }
+      console.log("Attempting PASS 1: Vector Store Search");
+      try {
+        run = await openai.beta.threads.runs.create(thread.id, {
+          assistant_id: assistantId,
+          tool_choice: { type: "file_search" },
+          tool_resources: {
+            file_search: {
+              vector_store_ids: [vectorStoreId],
+            },
+          },
+        });
+        await waitForRunCompletion(thread.id, run.id, openai);
+        messages = await openai.beta.threads.messages.list(thread.id, { order: 'desc', limit: 1 });
+        reply = messages.data[0]?.content[0]?.text?.value || "";
+        console.log("🔍 Vector reply:", reply);
+      } catch (vectorError) {
+        console.error("Error during PASS 1:", vectorError.message);
+        reply = "";
+      }
     } else {
-        console.log("Skipping PASS 1: Vector Store Search (OPENAI_VECTOR_STORE_ID not configured).");
+      console.log("Skipping PASS 1: No vector store configured.");
     }
 
-
-    // === PASS 2: Fallback to Model if reply too short or generic ===
     if (!reply || reply.length < fallbackReplyMinLength) {
-      console.log(`⚠️ Vector store reply insufficient (length: ${reply.length}, min: ${fallbackReplyMinLength}). Retrying with general model knowledge...`);
+      console.log(`⚠️ Reply too short (length ${reply.length}). Falling back...`);
 
       if (fallbackStrategy === "RETRY_WITH_CLARIFICATION_PROMPT" && fallbackClarificationPrompt) {
         await openai.beta.threads.messages.create(thread.id, {
-          role: "user", // Or "assistant" if you want to frame it as a thought process for the AI
+          role: "user",
           content: fallbackClarificationPrompt,
         });
-        console.log("Added clarification prompt for fallback.");
       }
-      // If "RETRY_NO_ADDITIONAL_PROMPT", we simply create a new run without adding more messages.
 
       run = await openai.beta.threads.runs.create(thread.id, {
         assistant_id: assistantId,
-        // tool_choice: "auto", // Let assistant decide, or remove to use its default configuration
       });
 
       await waitForRunCompletion(thread.id, run.id, openai);
-
       messages = await openai.beta.threads.messages.list(thread.id, { order: 'desc', limit: 1 });
 
-let rawMessage = null;
-try {
-  rawMessage = messages?.data?.[0]?.content?.[0]?.text?.value;
-} catch (e) {
-  console.error("💥 Error reading message content:", e);
-}
+      let rawMessage = null;
+      try {
+        rawMessage = messages?.data?.[0]?.content?.[0]?.text?.value;
+      } catch (e) {
+        console.error("💥 Error reading fallback message:", e);
+      }
 
-reply = rawMessage || "No useful answer from fallback.";
-console.log("💡 Fallback reply:", reply);
-
+      reply = rawMessage || "No useful answer from fallback.";
+      console.log("💡 Fallback reply:", reply);
     }
 
-  // === Optional: Generate speech (only if meaningful reply) ===
-let base64Audio = null;
-if (reply && reply.length >= speechReplyMinLength) {
-  try {
-    console.log("Generating speech...");
-
-    // ✅ Extract voice config from env first
-    const voiceModel = process.env.VOICE_MODEL || "tts-1";
-    const voiceName = process.env.VOICE_NAME || "sage";
-
-    const speechResponse = await openai.audio.speech.create({
-      model: voiceModel,
-      voice: voiceName,
-      input: reply,
-    });
-
-    const audioBuffer = await speechResponse.arrayBuffer();
-    base64Audio = Buffer.from(audioBuffer).toString("base64");
-    console.log("Speech generated.");
-  } catch (speechError) {
-    console.error("Speech generation error:", speechError);
-    // Continue without audio if speech generation fails
-  }
-}
-
+    let base64Audio = null;
+    if (reply && reply.length >= speechReplyMinLength) {
+      try {
+        console.log("Generating speech...");
+        const voiceModel = process.env.VOICE_MODEL || "tts-1";
+        const voiceName = process.env.VOICE_NAME || "sage";
+        const speechResponse = await openai.audio.speech.create({
+          model: voiceModel,
+          voice: voiceName,
+          input: reply,
+        });
+        const audioBuffer = await speechResponse.arrayBuffer();
+        base64Audio = Buffer.from(audioBuffer).toString("base64");
+        console.log("Speech generated.");
+      } catch (speechError) {
+        console.error("Speech generation error:", speechError);
+      }
+    }
 
     res.json({
       text: reply,
       audio: base64Audio ? `data:audio/mp3;base64,${base64Audio}` : null,
     });
-
   } catch (err) {
     console.error("Assistant /ask route error:", err);
     res.status(500).json({ error: "Failed to process assistant response", details: err.message });
   }
 });
 
-// --- Token endpoint for realtime voice using Professor Rich with guardrails & error trapping ---
+// --- Token endpoint for real-time ---
 app.get("/token", async (req, res) => {
   try {
     const response = await fetch("https://api.openai.com/v1/realtime/sessions", {
@@ -255,14 +207,6 @@ Always prioritize attached documents using the 'ensure_knowledge_base_usage' too
       }),
     });
 
-    const json = await response.json();
-    res.json(json);
-  } catch (err) {
-    console.error("Token generation error:", err);
-    res.status(500).json({ error: "Failed to generate token" });
-  }
-});
-
     if (!response.ok) {
       const errorText = await response.text();
       console.error(`[TOKEN ERROR] Status ${response.status}: ${errorText}`);
@@ -270,23 +214,22 @@ Always prioritize attached documents using the 'ensure_knowledge_base_usage' too
     }
 
     const data = await response.json();
-
     if (!data.client_secret || !data.client_secret.value) {
-  console.error("[TOKEN ERROR] No client_secret returned:", data);
-  return res.status(500).json({ error: "Missing client_secret in OpenAI response", raw: data });
-}
+      console.error("[TOKEN ERROR] No client_secret returned:", data);
+      return res.status(500).json({ error: "Missing client_secret in OpenAI response", raw: data });
+    }
 
-res.json({
-  token: data.client_secret.value,
-  expires_in: data.client_secret.expires_at
-});
+    res.json({
+      token: data.client_secret.value,
+      expires_in: data.client_secret.expires_at
+    });
   } catch (error) {
     console.error("[TOKEN ERROR] Unexpected:", error);
     res.status(500).json({ error: "Token generation failed", details: error.message });
   }
-}); // ✅ This must be present and closed!
+});
 
-// --- Serve static site ---
+// --- Static site handling ---
 if (isProd) {
   const clientDistPath = path.resolve(__dirname, "dist/client");
   if (fs.existsSync(clientDistPath)) {
@@ -295,19 +238,17 @@ if (isProd) {
       res.sendFile(path.resolve(clientDistPath, "index.html"));
     });
   } else {
-    console.warn(`Production mode: 'dist/client' directory not found at ${clientDistPath}. Frontend will not be served.`);
+    console.warn(`'dist/client' not found at ${clientDistPath}`);
     app.get("*", (req, res) => {
-        res.status(404).send("Frontend not found. Ensure your client application is built and in the 'dist/client' directory.");
+      res.status(404).send("Frontend not found.");
     });
   }
-} else { // Development mode
+} else {
   (async () => {
     try {
       const vite = await createViteServer({
         server: { middlewareMode: true },
         appType: "custom",
-        // Define the root of your client project if it's not the same as the server project root
-        // root: path.resolve(__dirname, "../client") // Example if client is in a parent 'client' folder
       });
 
       app.use(vite.middlewares);
@@ -317,8 +258,8 @@ if (isProd) {
       app.use("*", async (req, res, next) => {
         try {
           if (!fs.existsSync(clientHtmlPath)) {
-            console.error(`Development mode: client/index.html not found at ${clientHtmlPath}`);
-            return res.status(404).send(`client/index.html not found at ${clientHtmlPath}. Please check the path.`);
+            console.error(`Dev: client/index.html not found at ${clientHtmlPath}`);
+            return res.status(404).send("client/index.html missing.");
           }
           const html = await vite.transformIndexHtml(
             req.originalUrl,
@@ -330,20 +271,15 @@ if (isProd) {
           next(e);
         }
       });
-      console.log("Vite dev server middleware configured.");
     } catch (viteError) {
-        console.error("Failed to create or use Vite server:", viteError);
-        // Fallback or error message if Vite fails
-        app.use("*", (req, res) => {
-            res.status(500).send("Vite server failed to initialize. Check server logs.");
-        });
+      console.error("Failed to init Vite:", viteError);
+      app.use("*", (req, res) => {
+        res.status(500).send("Vite failed.");
+      });
     }
   })();
 }
 
 app.listen(port, () => {
-  console.log(`✅ Express server running in ${isProd ? 'production' : 'development'} mode on http://localhost:${port}`);
-  if (!isProd) {
-    console.log("   Vite dev server is active for client-side assets.");
-  }
+  console.log(`✅ Server running in ${isProd ? "production" : "development"} mode on http://localhost:${port}`);
 });
