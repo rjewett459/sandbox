@@ -207,24 +207,14 @@ Always prioritize attached documents using the 'ensure_knowledge_base_usage' too
       }),
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`[TOKEN ERROR] Status ${response.status}: ${errorText}`);
-      return res.status(500).json({ error: "OpenAI token fetch failed", details: errorText });
-    }
-
     const data = await response.json();
-    res.json(data);
-    if (!data.client_secret || !data.client_secret.value) {
-      console.error("[TOKEN ERROR] No client_secret returned:", data);
-      return res.status(500).json({ error: "Missing client_secret in OpenAI response", raw: data });
-    }
-    });
-  } catch (error) {
-    console.error("[TOKEN ERROR] Unexpected:", error);
-    res.status(500).json({ error: "Token generation failed", details: error.message });
+    res.json(data); // ✅ return the full structure with client_secret.value
+  } catch (err) {
+    console.error("Token generation error:", err);
+    res.status(500).json({ error: "Failed to generate token" });
   }
 });
+
 
 // --- Static site handling ---
 if (isProd) {
